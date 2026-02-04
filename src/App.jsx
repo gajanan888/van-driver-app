@@ -1,0 +1,632 @@
+import React, { useState, useEffect } from 'react';
+import useStorage from './useStorage';
+import { supabase } from './supabase';
+import Auth from './Auth';
+
+const PaymentModal = ({ isOpen, onClose, student, amount, setAmount, onConfirm }) => {
+  if (!isOpen || !student) return null;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={e => e.stopPropagation()}>
+        <h2 style={{ marginBottom: '10px' }}>Receive Payment</h2>
+        <p style={{ color: 'var(--text-light)', marginBottom: '20px' }}>
+          Enter amount received from <b>{student.name}</b>
+        </p>
+
+        <form onSubmit={onConfirm}>
+          <div className="input-group">
+            <label>Amount (₹)</label>
+            <input
+              type="number"
+              value={amount}
+              onChange={e => setAmount(e.target.value)}
+              placeholder="e.g. 500"
+              autoFocus
+              required
+            />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+            <div style={{ background: '#f8fafc', padding: '10px', borderRadius: '8px', textAlign: 'center' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>Pending</div>
+              <div style={{ fontWeight: 'bold', color: 'var(--danger)' }}>₹{student.pendingFees}</div>
+            </div>
+            <div style={{ background: '#f0fdf4', padding: '10px', borderRadius: '8px', textAlign: 'center' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>After Payment</div>
+              <div style={{ fontWeight: 'bold', color: 'var(--success)' }}>
+                ₹{Math.max(0, student.pendingFees - (Number(amount) || 0))}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+            <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>Confirm Payment</button>
+            <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+const BulkMessageModal = ({ isOpen, onClose, queue, onProcessNext, onSkip }) => {
+  if (!isOpen || !queue || queue.length === 0) return null;
+  const current = queue[0];
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal-content" style={{ textAlign: 'center' }}>
+        <h2 style={{ marginBottom: '5px' }}>Bulk Mode ⚡</h2>
+        <p style={{ color: 'var(--text-light)', marginBottom: '20px' }}>
+          Sending reminders ({queue.length} left)
+        </p>
+
+        <div className="card" style={{ background: '#f8fafc', marginBottom: '25px' }}>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-light)' }}>Next Student</div>
+          <div style={{ fontSize: '1.2rem', fontWeight: 'bold', margin: '5px 0' }}>{current.name}</div>
+          <div style={{ fontSize: '0.9rem' }}>Pending: <b style={{ color: 'var(--danger)' }}>₹{current.pendingFees}</b></div>
+        </div>
+
+        <button
+          className="btn btn-primary"
+          style={{ width: '100%', padding: '15px', fontSize: '1.1rem', marginBottom: '10px' }}
+          onClick={onProcessNext}
+        >
+          Send WhatsApp & Next 🟢
+        </button>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+          <button className="btn btn-secondary" onClick={onSkip}>Skip</button>
+          <button className="btn btn-danger" onClick={onClose}>Finish</button>
+        </div>
+
+        <p style={{ marginTop: '20px', fontSize: '0.75rem', color: 'var(--text-light)' }}>
+          Click the green button to open each chat.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+const App = () => {
+  const [session, setSession] = useState(null);
+  const { data, addSchool, deleteSchool, addStudent, updateFees, deleteStudent } = useStorage(session);
+  const [view, setView] = useState('dashboard'); // dashboard, schools, students, add-school, add-student
+  const [activeSchool, setActiveSchool] = useState(null);
+
+  // Form States
+  const [schoolName, setSchoolName] = useState('');
+  const [studentName, setStudentName] = useState('');
+  const [parentPhone, setParentPhone] = useState('');
+  const [totalFees, setTotalFees] = useState('');
+  const [admissionDate, setAdmissionDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // PIN Privacy states
+  const [isLocked, setIsLocked] = useState(true);
+  const [userPin, setUserPin] = useState('');
+  const savedPin = localStorage.getItem('app_privacy_pin');
+
+  // UI States (Moved to top to fix React Hook order)
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [paymentAmount, setPaymentAmount] = useState('');
+
+  // Search State
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Bulk Message Queue
+  const [messageQueue, setMessageQueue] = useState([]);
+  const [isQueueOpen, setIsQueueOpen] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+  }, []);
+
+  const handlePinSubmit = (e) => {
+    e.preventDefault();
+    if (userPin === savedPin) {
+      setIsLocked(false);
+    } else {
+      alert('Incorrect PIN');
+      setUserPin('');
+    }
+  };
+
+  const handleSetPin = (e) => {
+    e.preventDefault();
+    if (userPin.length === 4) {
+      localStorage.setItem('app_privacy_pin', userPin);
+      setIsLocked(false);
+      alert('PIN Set Successfully!');
+    } else {
+      alert('PIN must be 4 digits');
+    }
+  };
+
+  if (!session) {
+    return <Auth onLogin={() => setView('dashboard')} />;
+  }
+
+  // Show PIN Lock if PIN exists and app is locked
+  if (savedPin && isLocked) {
+    return (
+      <div className="container animate-in" style={{ padding: '50px 20px', textAlign: 'center' }}>
+        <div style={{ fontSize: '3rem', marginBottom: '20px' }}>🔒</div>
+        <h2>Enter Privacy PIN</h2>
+        <form onSubmit={handlePinSubmit} style={{ marginTop: '20px' }}>
+          <input
+            type="password"
+            pattern="[0-9]*"
+            inputMode="numeric"
+            maxLength="4"
+            value={userPin}
+            onChange={e => setUserPin(e.target.value)}
+            style={{ fontSize: '2rem', textAlign: 'center', letterSpacing: '10px', width: '200px', padding: '10px' }}
+            autoFocus
+          />
+          <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '30px' }}>Unlock App</button>
+        </form>
+      </div>
+    );
+  }
+
+  // Show "Set PIN" if no PIN exists (one-time setup)
+  if (!savedPin && view === 'settings-pin') {
+    return (
+      <div className="container animate-in" style={{ padding: '40px 20px' }}>
+        <h2>Set Privacy PIN</h2>
+        <p style={{ color: 'var(--text-light)', marginBottom: '20px' }}>Choose a 4-digit PIN to lock your student data.</p>
+        <form onSubmit={handleSetPin}>
+          <div className="input-group">
+            <label>New 4-Digit PIN</label>
+            <input type="password" pattern="[0-9]*" inputMode="numeric" maxLength="4" value={userPin} onChange={e => setUserPin(e.target.value)} required />
+          </div>
+          <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>Save PIN</button>
+          <button type="button" className="btn btn-secondary" style={{ width: '100%', marginTop: '10px' }} onClick={() => setView('dashboard')}>Cancel</button>
+        </form>
+      </div>
+    );
+  }
+
+  const handleAddSchool = (e) => {
+    e.preventDefault();
+    if (!schoolName) return;
+    addSchool(schoolName);
+    setSchoolName('');
+    setView('schools');
+  };
+
+  const handleAddStudent = (e) => {
+    e.preventDefault();
+    if (!studentName || !parentPhone || !activeSchool) return;
+    addStudent({
+      name: studentName,
+      parentPhone,
+      totalFees: Number(totalFees),
+      schoolId: activeSchool.id,
+      admissionDate: admissionDate
+    });
+    setStudentName('');
+    setParentPhone('');
+    setTotalFees('');
+    setAdmissionDate(new Date().toISOString().split('T')[0]);
+    setView('students');
+  };
+
+  const sendSms = (student) => {
+    const message = `Hello, this is your van driver. Fee updated for ${student.name}. Paid: ${student.paidFees}, Pending: ${student.pendingFees}. Thank you!`;
+    window.location.href = `sms:${student.parentPhone}?body=${encodeURIComponent(message)}`;
+  };
+
+  const sendWhatsApp = (student, customMsg = null) => {
+    // Ensure phone starts with 91 if it's 10 digits
+    let phone = student.parentPhone.replace(/\D/g, '');
+    if (phone.length === 10) phone = '91' + phone;
+
+    const message = customMsg || `Hello, this is your van driver. Monthly fee for *${student.name}* is due. \n\n*Details:*\nMonthly: ₹${student.totalFees}\nTotal Pending: *₹${student.pendingFees}*\n\nPlease pay at your earliest convenience. Thank you!`;
+
+    const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    window.open(waUrl, '_blank');
+  };
+
+  const startBulkWhatsApp = (students) => {
+    if (students.length === 0) return alert("No students to message!");
+    setMessageQueue(students);
+    setIsQueueOpen(true);
+  };
+
+  const processNextInQueue = () => {
+    if (messageQueue.length === 0) return;
+    const current = messageQueue[0];
+    sendWhatsApp(current);
+
+    // Remove the first item after a short delay so the UI feels responsive
+    const remaining = messageQueue.slice(1);
+    setMessageQueue(remaining);
+    if (remaining.length === 0) setIsQueueOpen(false);
+  };
+
+  const renderDashboard = () => {
+    const today = new Date().toISOString().split('T')[0];
+    const studentsArr = data.students || [];
+    const dueStudents = studentsArr.filter(s => s.lastBilledDate === today);
+
+    return (
+      <div className="animate-in">
+        <header className="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+          <div>
+            <h1>Van Driver Admin</h1>
+            <p style={{ color: 'var(--text-light)' }}>{session.user.email}</p>
+          </div>
+          <button
+            onClick={() => supabase.auth.signOut()}
+            className="btn-logout"
+          >
+            Logout 👋
+          </button>
+        </header>
+
+        {dueStudents.length > 0 && (
+          <div className="card" style={{ borderLeft: '4px solid var(--warning)', background: '#fffbeb' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <h3 style={{ color: '#92400e', margin: 0 }}>🔔 Due Today ({dueStudents.length})</h3>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  className="btn btn-outline"
+                  style={{ padding: '6px 12px', fontSize: '0.75rem', borderColor: '#22c55e', color: '#22c55e', background: 'white', width: 'auto' }}
+                  onClick={() => {
+                    if (confirm(`Send WhatsApp to ${dueStudents.length} students?`)) {
+                      startBulkWhatsApp(dueStudents);
+                    }
+                  }}
+                >
+                  🟢 WhatsApp All
+                </button>
+              </div>
+            </div>
+            <p style={{ fontSize: '0.85rem', marginBottom: '15px' }}>These students' monthly billing cycle started today.</p>
+            <div style={{ display: 'grid', gap: '8px' }}>
+              {dueStudents.map(student => (
+                <div key={student.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'white', padding: '10px', borderRadius: '8px', border: '1px solid #fde68a' }}>
+                  <div style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>{student.name}</div>
+                  <div style={{ display: 'flex', gap: '5px' }}>
+                    <button
+                      className="btn btn-outline"
+                      style={{ padding: '8px 12px', fontSize: '1rem', borderColor: '#22c55e', color: '#22c55e', width: 'auto' }}
+                      onClick={() => sendWhatsApp(student)}
+                      title="WhatsApp"
+                    >
+                      🟢
+                    </button>
+                    <button
+                      className="btn btn-primary"
+                      style={{ padding: '8px 12px', fontSize: '1rem', width: 'auto' }}
+                      onClick={() => {
+                        const msg = `Hello, this is your van driver. Monthly fee for ${student.name} is due today. Amount: ₹${student.totalFees}. Total Pending: ₹${student.pendingFees}. Thank you!`;
+                        window.location.href = `sms:${student.parentPhone}?body=${encodeURIComponent(msg)}`;
+                      }}
+                      title="SMS"
+                    >
+                      💬
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="card">
+          <h3>Quick Stats</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '10px' }}>
+            <div style={{ background: '#eff6ff', padding: '12px', borderRadius: '8px' }}>
+              <div style={{ fontSize: '0.8rem', color: '#3b82f6' }}>Schools</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{data.schools.length}</div>
+            </div>
+            <div style={{ background: '#f0fdf4', padding: '12px', borderRadius: '8px' }}>
+              <div style={{ fontSize: '0.8rem', color: '#22c55e' }}>Students</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{data.students.length}</div>
+            </div>
+          </div>
+
+          <div style={{ marginTop: '15px', borderTop: '1px solid var(--border)', paddingTop: '10px' }}>
+            <button
+              onClick={() => setView('settings-pin')}
+              style={{ background: 'none', color: 'var(--primary)', fontSize: '0.85rem', padding: '0' }}
+            >
+              {savedPin ? '🔒 Change Privacy PIN' : '🛡️ Setup Privacy PIN (Recommended)'}
+            </button>
+          </div>
+        </div>
+
+        <button className="btn btn-primary" onClick={() => setView('add-school')}>
+          + Add New School
+        </button>
+      </div>
+    );
+  };
+
+  const renderSchools = () => (
+    <div className="animate-in">
+      <div className="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2>Your Schools</h2>
+        <button onClick={() => setView('add-school')}>+ Add</button>
+      </div>
+      {data.schools.length === 0 ? (
+        <p>No schools added yet.</p>
+      ) : (
+        data.schools.map(school => (
+          <div key={school.id} className="card" onClick={() => { setActiveSchool(school); setView('students'); }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>{school.name}</div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-light)' }}>
+                  {data.students.filter(s => s.schoolId === school.id).length} Students
+                </div>
+              </div>
+              <button
+                onClick={(e) => { e.stopPropagation(); if (confirm('Delete this school?')) deleteSchool(school.id); }}
+                className="btn btn-danger"
+                style={{ padding: '6px 12px', fontSize: '0.8rem', width: 'auto' }}
+              >
+                🗑️ Delete
+              </button>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+
+
+  const renderStudents = () => {
+    const schoolStudents = data.students.filter(s => s.schoolId === activeSchool?.id);
+    return (
+      <div className="animate-in">
+        <div className="header">
+          <button
+            onClick={() => setView('schools')}
+            className="btn btn-secondary"
+            style={{ padding: '6px 14px', fontSize: '0.85rem', marginBottom: '10px', width: 'auto' }}
+          >
+            ← Back
+          </button>
+          <h2>{activeSchool?.name}</h2>
+        </div>
+
+        <div className="input-group" style={{ marginBottom: '15px' }}>
+          <div style={{ position: 'relative' }}>
+            <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-light)' }}>🔍</span>
+            <input
+              type="text"
+              placeholder="Search students..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ paddingLeft: '40px' }}
+            />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+          <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setView('add-student')}>
+            + Add Student
+          </button>
+          <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => {
+            const unpaid = schoolStudents.filter(s => s.pendingFees > 0);
+            if (unpaid.length === 0) return alert("All fees are paid!");
+            if (confirm(`Send reminders to ${unpaid.length} students?`)) {
+              startBulkWhatsApp(unpaid);
+            }
+          }}>
+            🟢 WhatsApp All
+          </button>
+        </div>
+
+        {schoolStudents.length === 0 ? (
+          <p>No students in this school.</p>
+        ) : (
+          schoolStudents
+            .filter(s => s.name.toLowerCase().includes(searchQuery.toLowerCase()) || s.parentPhone.includes(searchQuery))
+            .map(student => (
+              <div key={student.id} className="card" onClick={() => { setSelectedStudent(student); setView('student-detail'); }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '10px' }}>
+                  <div>
+                    <div style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>{student.name}</div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-light)' }}>{student.parentPhone}</div>
+                  </div>
+                  <div className={`badge ${student.pendingFees <= 0 ? 'badge-paid' : 'badge-pending'}`}>
+                    {student.pendingFees <= 0 ? 'Paid' : 'Pending'}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', marginBottom: '5px' }}>
+                  <span>Paid: <b>₹{student.paidFees}</b></span>
+                  <span>Pending: <b style={{ color: 'var(--danger)' }}>₹{student.pendingFees}</b></span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); if (confirm('Delete this student?')) deleteStudent(student.id); }}
+                    className="btn btn-danger"
+                    style={{ padding: '6px 10px', fontSize: '0.75rem', width: 'auto' }}
+                  >
+                    🗑️
+                  </button>
+                </div>
+
+                {student.lastPaidDate && (
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>
+                    Last: {student.lastPaidDate}
+                  </div>
+                )}
+              </div>
+            ))
+        )}
+      </div>
+    );
+  };
+
+
+  const renderStudentDetail = () => {
+    if (!selectedStudent) return null;
+
+    const handlePaymentSubmit = (e) => {
+      e.preventDefault();
+      if (!paymentAmount) return;
+      updateFees(selectedStudent.id, paymentAmount);
+      // Refresh local view data for the UI
+      selectedStudent.paidFees += Number(paymentAmount);
+      selectedStudent.pendingFees -= Number(paymentAmount);
+      setPaymentAmount('');
+      setIsPaymentModalOpen(false);
+    };
+
+    return (
+      <div className="animate-in">
+        <div className="header">
+          <button
+            onClick={() => setView('students')}
+            className="btn btn-secondary"
+            style={{ padding: '6px 14px', fontSize: '0.85rem', marginBottom: '10px', width: 'auto' }}
+          >
+            ← Back
+          </button>
+          <h2>Student Details</h2>
+        </div>
+
+        <div className="card" style={{ borderLeft: '4px solid var(--primary)' }}>
+          <h3 style={{ marginBottom: '15px' }}>{selectedStudent.name}</h3>
+          <div style={{ display: 'grid', gap: '10px', fontSize: '0.95rem' }}>
+            <div>📅 <b>Admission:</b> {selectedStudent.admissionDate}</div>
+            <div>🗓️ <b>Next Billing:</b> {(() => {
+              const last = new Date(selectedStudent.lastBilledDate || selectedStudent.admissionDate);
+              last.setMonth(last.getMonth() + 1);
+              return last.toLocaleDateString('en-IN');
+            })()}</div>
+            <div>📞 <b>Phone:</b> {selectedStudent.parentPhone}</div>
+            <div>🏫 <b>School:</b> {activeSchool?.name}</div>
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: '10px', marginTop: '5px' }}>
+              <div>💰 <b>Monthly Fee:</b> ₹{selectedStudent.totalFees}</div>
+              <div>✅ <b>Total Paid:</b> ₹{selectedStudent.paidFees}</div>
+              <div>⏳ <b>Total Pending:</b> <span style={{ color: 'var(--danger)', fontWeight: 'bold' }}>₹{selectedStudent.pendingFees}</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+          <button className="btn btn-primary" onClick={() => setIsPaymentModalOpen(true)}>Receive Payment</button>
+          <button className="btn btn-outline" style={{ borderColor: '#22c55e', color: '#22c55e' }} onClick={() => sendWhatsApp(selectedStudent)}>WhatsApp</button>
+        </div>
+        <button className="btn btn-secondary" style={{ width: '100%', marginBottom: '20px' }} onClick={() => sendSms(selectedStudent)}>Send SMS</button>
+
+        <h3>Payment History</h3>
+        <div style={{ marginTop: '10px' }}>
+          {(!selectedStudent.paymentHistory || selectedStudent.paymentHistory.length === 0) ? (
+            <p style={{ color: 'var(--text-light)' }}>No payments recorded yet.</p>
+          ) : (
+            selectedStudent.paymentHistory.map((p, i) => (
+              <div key={i} className="card" style={{ padding: '12px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontWeight: 'bold' }}>₹{p.amount}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>{p.date}</div>
+                </div>
+                <div style={{ color: 'var(--success)', fontSize: '0.8rem' }}>Paid ✅</div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <PaymentModal
+          isOpen={isPaymentModalOpen}
+          onClose={() => setIsPaymentModalOpen(false)}
+          student={selectedStudent}
+          amount={paymentAmount}
+          setAmount={setPaymentAmount}
+          onConfirm={handlePaymentSubmit}
+        />
+      </div>
+    );
+  };
+
+  const renderAddSchool = () => (
+    <form onSubmit={handleAddSchool} className="animate-in">
+      <h2>Add New School</h2>
+      <div className="input-group">
+        <label>School Name</label>
+        <input value={schoolName} onChange={e => setSchoolName(e.target.value)} placeholder="e.g. St. Xavier School" required />
+      </div>
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <button type="submit" className="btn btn-primary">Save School</button>
+        <button type="button" className="btn btn-secondary" onClick={() => setView('dashboard')}>Cancel</button>
+      </div>
+    </form>
+  );
+
+  const renderAddStudent = () => (
+    <form onSubmit={handleAddStudent} className="animate-in">
+      <h2>Add Student to {activeSchool?.name}</h2>
+      <div className="input-group">
+        <label>Student Name</label>
+        <input value={studentName} onChange={e => setStudentName(e.target.value)} placeholder="Full Name" required />
+      </div>
+      <div className="input-group">
+        <label>Parent Phone Number</label>
+        <input value={parentPhone} onChange={e => setParentPhone(e.target.value)} placeholder="Phone Number" required />
+      </div>
+      <div className="input-group">
+        <label>Admission Date</label>
+        <input type="date" value={admissionDate} onChange={e => setAdmissionDate(e.target.value)} required />
+      </div>
+      <div className="input-group">
+        <label>Total Monthly Fee (₹)</label>
+        <input type="number" value={totalFees} onChange={e => setTotalFees(e.target.value)} placeholder="500" required />
+      </div>
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <button type="submit" className="btn btn-primary">Add Student</button>
+        <button type="button" className="btn btn-secondary" onClick={() => setView('students')}>Cancel</button>
+      </div>
+    </form>
+  );
+
+  return (
+    <div className="container">
+      <main style={{ flex: 1, paddingBottom: '80px' }}>
+        {view === 'dashboard' && renderDashboard()}
+        {view === 'schools' && renderSchools()}
+        {view === 'students' && renderStudents()}
+        {view === 'student-detail' && renderStudentDetail()}
+        {view === 'add-school' && renderAddSchool()}
+        {view === 'add-student' && renderAddStudent()}
+      </main>
+
+      <BulkMessageModal
+        isOpen={isQueueOpen}
+        onClose={() => setIsQueueOpen(false)}
+        queue={messageQueue}
+        onProcessNext={processNextInQueue}
+        onSkip={() => setMessageQueue(prev => prev.slice(1))}
+      />
+
+      <nav className="footer-nav">
+        <a href="#" className={`nav-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}>
+          <span>🏠</span>
+          <span>Home</span>
+        </a>
+        <a href="#" className={`nav-item ${view === 'schools' || view === 'students' ? 'active' : ''}`} onClick={() => setView('schools')}>
+          <span>🏫</span>
+          <span>Schools</span>
+        </a>
+        <a href="#" className="nav-item">
+          <span>⚡</span>
+          <span>Reports</span>
+        </a>
+      </nav>
+    </div>
+  );
+};
+
+export default App;
