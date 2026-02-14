@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Van Admin</string>
-    <string name="title_activity_main">Van Admin</string>
+    <string name="app_name">SADGURU BUS SERVICES</string>
+    <string name="title_activity_main">SADGURU BUS SERVICES</string>
     <string name="package_name">com.vandriver.admin</string>
     <string name="custom_url_scheme">com.vandriver.admin</string>
 </resources>
