@@ -7,15 +7,20 @@ const useStorage = (session) => {
     const [data, setData] = useState({ schools: [], students: [] });
     const [isInitialLoad, setIsInitialLoad] = useState(true);
 
+    // Dynamic storage key based on user ID for privacy
+    const userStorageKey = session ? `${STORAGE_KEY}_${session.user.id}` : STORAGE_KEY;
+
     // Load data from Supabase or fallback to LocalStorage
     useEffect(() => {
+        setData({ schools: [], students: [] }); // Clear data immediately on session change
         if (session) {
             fetchCloudData();
         } else {
-            const saved = localStorage.getItem(STORAGE_KEY);
+            const saved = localStorage.getItem(userStorageKey);
             if (saved) setData(JSON.parse(saved));
+            setIsInitialLoad(false);
         }
-    }, [session]);
+    }, [session, userStorageKey]);
 
     const fetchCloudData = async () => {
         const { data: schools, error: schoolError } = await supabase
@@ -32,9 +37,9 @@ const useStorage = (session) => {
             const safeSchools = schools || [];
             const safeStudents = students || [];
 
-            // If cloud is empty but local has data, migrate!
+            // If cloud is empty but local has user-specific data, migrate!
             if (safeSchools.length === 0 && safeStudents.length === 0) {
-                const local = localStorage.getItem(STORAGE_KEY);
+                const local = localStorage.getItem(userStorageKey);
                 if (local) {
                     const localData = JSON.parse(local);
                     if (localData.schools.length > 0 || localData.students.length > 0) {
@@ -68,53 +73,71 @@ const useStorage = (session) => {
     };
 
     useEffect(() => {
-        if (!isInitialLoad) {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        if (!isInitialLoad && session) {
+            localStorage.setItem(userStorageKey, JSON.stringify(data));
         }
-    }, [data, isInitialLoad]);
+    }, [data, isInitialLoad, userStorageKey]);
 
     useEffect(() => {
-        if (data.students.length > 0) {
+        if (!isInitialLoad && data.students.length > 0) {
             performBilling();
         }
-    }, [isInitialLoad]);
+    }, [isInitialLoad, data.students]);
 
     const performBilling = () => {
+        const getLocalDateString = (date) => {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        };
+
         const today = new Date();
+        const todayStr = getLocalDateString(today);
         let changed = false;
 
         const updatedStudents = data.students.map(s => {
-            const lastBill = new Date(s.lastBilledDate || s.admissionDate);
-            let monthsPassed = 0;
+            // Parse admission date carefully to avoid timezone shifts
+            const [y, m, d] = s.admissionDate.split('-').map(Number);
+            const admission = new Date(y, m - 1, d);
 
+            // Parse last billed date or admission date
+            const [by, bm, bd] = (s.lastBilledDate || s.admissionDate).split('-').map(Number);
+            const lastBill = new Date(by, bm - 1, bd);
+
+            // Calculate next billing date based on the admission day
             let nextBill = new Date(lastBill);
             nextBill.setMonth(nextBill.getMonth() + 1);
 
-            while (nextBill <= today) {
-                monthsPassed++;
-                nextBill.setMonth(nextBill.getMonth() + 1);
+            let monthsToBill = 0;
+            let tempNextBill = new Date(nextBill);
+
+            // Compare using local year/month/day
+            while (getLocalDateString(tempNextBill) <= todayStr) {
+                monthsToBill++;
+                tempNextBill.setMonth(tempNextBill.getMonth() + 1);
             }
 
-            if (monthsPassed > 0) {
+            if (monthsToBill > 0) {
                 changed = true;
-                const finalBillDate = new Date(lastBill);
-                finalBillDate.setMonth(finalBillDate.getMonth() + monthsPassed);
+                const finalBilledDate = new Date(lastBill);
+                finalBilledDate.setMonth(finalBilledDate.getMonth() + monthsToBill);
+                const newBilledDateStr = getLocalDateString(finalBilledDate);
 
-                const newPending = Number(s.pendingFees) + (monthsPassed * Number(s.totalFees));
-                const newBilledDate = finalBillDate.toISOString().split('T')[0];
+                const additionalFees = monthsToBill * Number(s.totalFees);
+                const newPending = Number(s.pendingFees) + additionalFees;
 
-                // Update cloud too
                 if (session) {
                     supabase.from('students').update({
                         pendingFees: newPending,
-                        lastBilledDate: newBilledDate
+                        lastBilledDate: newBilledDateStr
                     }).eq('id', s.id).then();
                 }
 
                 return {
                     ...s,
                     pendingFees: newPending,
-                    lastBilledDate: newBilledDate
+                    lastBilledDate: newBilledDateStr
                 };
             }
             return s;
@@ -156,7 +179,7 @@ const useStorage = (session) => {
     };
 
     const addStudent = async (student) => {
-        const admission = student.admissionDate || new Date().toISOString().split('T')[0];
+        const admission = student.admissionDate;
         const newStudent = {
             ...student,
             admissionDate: admission,
@@ -190,7 +213,7 @@ const useStorage = (session) => {
         if (!student) return;
 
         const newPaidTotal = Number(student.paidFees) + Number(paidAmount);
-        const newPending = Math.max(0, Number(student.totalFees) - newPaidTotal);
+        const newPending = Math.max(0, Number(student.pendingFees) - Number(paidAmount));
         const newPayment = { amount: Number(paidAmount), date: today };
         const newHistory = [newPayment, ...(student.paymentHistory || [])];
 

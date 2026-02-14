@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import useStorage from './useStorage';
 import { supabase } from './supabase';
 import Auth from './Auth';
+import ThemeToggle from './ThemeToggle';
 
 const PaymentModal = ({ isOpen, onClose, student, amount, setAmount, onConfirm }) => {
   if (!isOpen || !student) return null;
@@ -55,34 +56,41 @@ const BulkMessageModal = ({ isOpen, onClose, queue, onProcessNext, onSkip }) => 
   const current = queue[0];
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-content" style={{ textAlign: 'center' }}>
-        <h2 style={{ marginBottom: '5px' }}>Bulk Mode ⚡</h2>
-        <p style={{ color: 'var(--text-light)', marginBottom: '20px' }}>
+    <div className="modal-overlay" style={{ background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)' }}>
+      <div className="modal-content pulsing-border" style={{ textAlign: 'center', padding: '40px 30px' }}>
+        <div style={{ fontSize: '4rem', marginBottom: '20px' }}>⚡</div>
+        <h2 style={{ fontSize: '1.8rem', marginBottom: '10px' }}>Quick-Fire Mode</h2>
+        <p style={{ color: 'var(--text-light)', marginBottom: '30px' }}>
           Sending reminders ({queue.length} left)
         </p>
 
-        <div className="card" style={{ background: '#f8fafc', marginBottom: '25px' }}>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-light)' }}>Next Student</div>
-          <div style={{ fontSize: '1.2rem', fontWeight: 'bold', margin: '5px 0' }}>{current.name}</div>
-          <div style={{ fontSize: '0.9rem' }}>Pending: <b style={{ color: 'var(--danger)' }}>₹{current.pendingFees}</b></div>
+        <div className="card" style={{ background: 'var(--bg)', border: '2px solid var(--primary)', marginBottom: '30px', padding: '25px' }}>
+          <div style={{ fontSize: '0.9rem', color: 'var(--text-light)', textTransform: 'uppercase', letterSpacing: '1px' }}>Next Parent</div>
+          <div style={{ fontSize: '1.6rem', fontWeight: 'bold', margin: '10px 0', color: 'var(--text)' }}>{current.name}</div>
+          <div style={{ fontSize: '1.1rem', fontWeight: '600' }}>Pending: <span style={{ color: 'var(--danger)' }}>₹{current.pendingFees}</span></div>
         </div>
 
         <button
           className="btn btn-primary"
-          style={{ width: '100%', padding: '15px', fontSize: '1.1rem', marginBottom: '10px' }}
+          style={{
+            width: '100%',
+            padding: '20px',
+            fontSize: '1.3rem',
+            marginBottom: '15px',
+            boxShadow: '0 10px 20px rgba(99, 102, 241, 0.4)'
+          }}
           onClick={onProcessNext}
         >
-          Send WhatsApp & Next 🟢
+          Open WhatsApp 🟢
         </button>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-          <button className="btn btn-secondary" onClick={onSkip}>Skip</button>
-          <button className="btn btn-danger" onClick={onClose}>Finish</button>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+          <button className="btn btn-secondary" style={{ padding: '15px' }} onClick={onSkip}>Skip Student</button>
+          <button className="btn btn-danger" style={{ padding: '15px', background: 'transparent', border: 'none', color: 'var(--text-light)' }} onClick={onClose}>Stop Sending</button>
         </div>
 
-        <p style={{ marginTop: '20px', fontSize: '0.75rem', color: 'var(--text-light)' }}>
-          Click the green button to open each chat.
+        <p style={{ marginTop: '25px', fontSize: '0.85rem', color: 'var(--text-light)', fontStyle: 'italic' }}>
+          Tap the blue button, send the message in WhatsApp, then come back here for the next one!
         </p>
       </div>
     </div>
@@ -100,12 +108,16 @@ const App = () => {
   const [studentName, setStudentName] = useState('');
   const [parentPhone, setParentPhone] = useState('');
   const [totalFees, setTotalFees] = useState('');
-  const [admissionDate, setAdmissionDate] = useState(new Date().toISOString().split('T')[0]);
+  const [admissionDate, setAdmissionDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
 
   // PIN Privacy states
   const [isLocked, setIsLocked] = useState(true);
   const [userPin, setUserPin] = useState('');
-  const savedPin = localStorage.getItem('app_privacy_pin');
+  const userPinKey = `app_privacy_pin_${session?.user?.id}`;
+  const savedPin = localStorage.getItem(userPinKey);
 
   // UI States (Moved to top to fix React Hook order)
   const [selectedStudent, setSelectedStudent] = useState(null);
@@ -142,7 +154,7 @@ const App = () => {
   const handleSetPin = (e) => {
     e.preventDefault();
     if (userPin.length === 4) {
-      localStorage.setItem('app_privacy_pin', userPin);
+      localStorage.setItem(userPinKey, userPin);
       setIsLocked(false);
       alert('PIN Set Successfully!');
     } else {
@@ -159,8 +171,9 @@ const App = () => {
     return (
       <div className="container animate-in" style={{ padding: '50px 20px', textAlign: 'center' }}>
         <div style={{ fontSize: '3rem', marginBottom: '20px' }}>🔒</div>
-        <h2>Enter Privacy PIN</h2>
-        <form onSubmit={handlePinSubmit} style={{ marginTop: '20px' }}>
+        <h2 style={{ fontSize: '1.5rem', marginBottom: '10px' }}>Enter Privacy PIN</h2>
+        <p style={{ color: 'var(--text-light)', fontSize: '0.9rem' }}>Protecting your business data</p>
+        <form onSubmit={handlePinSubmit} style={{ marginTop: '30px' }}>
           <input
             type="password"
             pattern="[0-9]*"
@@ -168,10 +181,28 @@ const App = () => {
             maxLength="4"
             value={userPin}
             onChange={e => setUserPin(e.target.value)}
-            style={{ fontSize: '2rem', textAlign: 'center', letterSpacing: '10px', width: '200px', padding: '10px' }}
+            style={{
+              fontSize: '2rem',
+              textAlign: 'center',
+              letterSpacing: '10px',
+              width: '100%',
+              maxWidth: '220px',
+              padding: '15px',
+              borderRadius: '20px',
+              background: 'var(--card)',
+              border: '2px solid var(--primary)'
+            }}
             autoFocus
           />
-          <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '30px' }}>Unlock App</button>
+          <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '30px' }}>Unlock Dashboard</button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            style={{ width: '100%', marginTop: '10px' }}
+            onClick={() => supabase.auth.signOut()}
+          >
+            Switch Account
+          </button>
         </form>
       </div>
     );
@@ -216,7 +247,8 @@ const App = () => {
     setStudentName('');
     setParentPhone('');
     setTotalFees('');
-    setAdmissionDate(new Date().toISOString().split('T')[0]);
+    const d = new Date();
+    setAdmissionDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
     setView('students');
   };
 
@@ -230,10 +262,21 @@ const App = () => {
     let phone = student.parentPhone.replace(/\D/g, '');
     if (phone.length === 10) phone = '91' + phone;
 
-    const message = customMsg || `Hello, this is your van driver. Monthly fee for *${student.name}* is due. \n\n*Details:*\nMonthly: ₹${student.totalFees}\nTotal Pending: *₹${student.pendingFees}*\n\nPlease pay at your earliest convenience. Thank you!`;
+    const message = customMsg || `Dear Parent, This is to inform you that the school van fee for this month has ended kindly pay the van fee at your earliest convenience. Thank You.`;
 
     const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
     window.open(waUrl, '_blank');
+  };
+
+  const sendPaymentConfirmation = (student, amount, method) => {
+    const today = new Date().toLocaleDateString('en-IN');
+    const msg = `Dear Parent, ₹${amount} for school van fee has been received on ${today}. Thank you for your Payment.`;
+
+    if (method === 'whatsapp') {
+      sendWhatsApp(student, msg);
+    } else {
+      window.location.href = `sms:${student.parentPhone}?body=${encodeURIComponent(msg)}`;
+    }
   };
 
   const startBulkWhatsApp = (students) => {
@@ -254,67 +297,70 @@ const App = () => {
   };
 
   const renderDashboard = () => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    const todayStr = `${y}-${m}-${d}`;
     const studentsArr = data.students || [];
-    const dueStudents = studentsArr.filter(s => s.lastBilledDate === today);
+
+    // Students who just rolled over their cycle today or are still pending
+    const dueStudents = studentsArr.filter(s => {
+      return s.lastBilledDate === todayStr && s.pendingFees > 0;
+    });
 
     return (
       <div className="animate-in">
-        <header className="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+        <header className="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: 'none' }}>
           <div>
-            <h1>Van Driver Admin</h1>
-            <p style={{ color: 'var(--text-light)' }}>{session.user.email}</p>
+            <h1 style={{ fontSize: '1.5rem', letterSpacing: '-0.5px' }}>SADGURU BUS SERVICES</h1>
+            <p style={{ color: 'var(--text-light)', fontSize: '0.85rem' }}>{session.user.email}</p>
           </div>
-          <button
-            onClick={() => supabase.auth.signOut()}
-            className="btn-logout"
-          >
-            Logout 👋
-          </button>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <ThemeToggle />
+            <button
+              onClick={() => supabase.auth.signOut()}
+              className="btn-logout"
+            >
+              Logout 👋
+            </button>
+          </div>
         </header>
 
         {dueStudents.length > 0 && (
-          <div className="card" style={{ borderLeft: '4px solid var(--warning)', background: '#fffbeb' }}>
+          <div className="card pulsing-border" style={{ borderLeft: '4px solid var(--warning)', background: '#fffbeb' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <h3 style={{ color: '#92400e', margin: 0 }}>🔔 Due Today ({dueStudents.length})</h3>
+              <h3 style={{ color: '#92400e', margin: 0 }}>🚨 Month Ended! ({dueStudents.length})</h3>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button
                   className="btn btn-outline"
                   style={{ padding: '6px 12px', fontSize: '0.75rem', borderColor: '#22c55e', color: '#22c55e', background: 'white', width: 'auto' }}
                   onClick={() => {
-                    if (confirm(`Send WhatsApp to ${dueStudents.length} students?`)) {
+                    if (confirm(`Send Fee Reminders to ${dueStudents.length} parents?`)) {
                       startBulkWhatsApp(dueStudents);
                     }
                   }}
                 >
-                  🟢 WhatsApp All
+                  🟢 Remind All
                 </button>
               </div>
             </div>
-            <p style={{ fontSize: '0.85rem', marginBottom: '15px' }}>These students' monthly billing cycle started today.</p>
+            <p style={{ fontSize: '0.85rem', marginBottom: '15px' }}>These students' cycles ended today. Send them clinical feedback.</p>
             <div style={{ display: 'grid', gap: '8px' }}>
               {dueStudents.map(student => (
                 <div key={student.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'white', padding: '10px', borderRadius: '8px', border: '1px solid #fde68a' }}>
-                  <div style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>{student.name}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 'bold', fontSize: '0.95rem' }}>{student.name}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#b45309' }}>Total Due: ₹{student.pendingFees}</div>
+                  </div>
                   <div style={{ display: 'flex', gap: '5px' }}>
                     <button
                       className="btn btn-outline"
-                      style={{ padding: '8px 12px', fontSize: '1rem', borderColor: '#22c55e', color: '#22c55e', width: 'auto' }}
+                      style={{ padding: '8px 15px', fontSize: '1rem', borderColor: '#22c55e', color: '#22c55e', width: 'auto' }}
                       onClick={() => sendWhatsApp(student)}
-                      title="WhatsApp"
+                      title="WhatsApp Reminder"
                     >
-                      🟢
-                    </button>
-                    <button
-                      className="btn btn-primary"
-                      style={{ padding: '8px 12px', fontSize: '1rem', width: 'auto' }}
-                      onClick={() => {
-                        const msg = `Hello, this is your van driver. Monthly fee for ${student.name} is due today. Amount: ₹${student.totalFees}. Total Pending: ₹${student.pendingFees}. Thank you!`;
-                        window.location.href = `sms:${student.parentPhone}?body=${encodeURIComponent(msg)}`;
-                      }}
-                      title="SMS"
-                    >
-                      💬
+                      🟢 Send
                     </button>
                   </div>
                 </div>
@@ -323,16 +369,16 @@ const App = () => {
           </div>
         )}
 
-        <div className="card">
-          <h3>Quick Stats</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '10px' }}>
-            <div style={{ background: '#eff6ff', padding: '12px', borderRadius: '8px' }}>
-              <div style={{ fontSize: '0.8rem', color: '#3b82f6' }}>Schools</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{data.schools.length}</div>
+        <div className="card glass">
+          <h3 style={{ fontSize: '1.1rem', marginBottom: '15px' }}>Quick Stats 📊</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div style={{ background: 'rgba(99, 102, 241, 0.1)', padding: '16px', borderRadius: '16px', border: '1px solid rgba(99, 102, 241, 0.2)' }}>
+              <div style={{ fontSize: '0.8rem', color: 'var(--primary)', fontWeight: '600', marginBottom: '4px' }}>Schools</div>
+              <div style={{ fontSize: '1.8rem', fontWeight: '800' }}>{data.schools.length}</div>
             </div>
-            <div style={{ background: '#f0fdf4', padding: '12px', borderRadius: '8px' }}>
-              <div style={{ fontSize: '0.8rem', color: '#22c55e' }}>Students</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{data.students.length}</div>
+            <div style={{ background: 'rgba(16, 185, 129, 0.1)', padding: '16px', borderRadius: '16px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+              <div style={{ fontSize: '0.8rem', color: 'var(--success)', fontWeight: '600', marginBottom: '4px' }}>Students</div>
+              <div style={{ fontSize: '1.8rem', fontWeight: '800' }}>{data.students.length}</div>
             </div>
           </div>
 
@@ -477,10 +523,19 @@ const App = () => {
     const handlePaymentSubmit = (e) => {
       e.preventDefault();
       if (!paymentAmount) return;
-      updateFees(selectedStudent.id, paymentAmount);
+      const amount = Number(paymentAmount);
+      updateFees(selectedStudent.id, amount);
       // Refresh local view data for the UI
-      selectedStudent.paidFees += Number(paymentAmount);
-      selectedStudent.pendingFees -= Number(paymentAmount);
+      selectedStudent.paidFees += amount;
+      selectedStudent.pendingFees -= amount;
+
+      const confirmMsg = `Payment of ₹${amount} recorded for ${selectedStudent.name}. Send confirmation message?`;
+      const sendChoice = confirm(confirmMsg + "\n\nPress OK for WhatsApp, Cancel for no message.");
+
+      if (sendChoice) {
+        sendPaymentConfirmation(selectedStudent, amount, 'whatsapp');
+      }
+
       setPaymentAmount('');
       setIsPaymentModalOpen(false);
     };
