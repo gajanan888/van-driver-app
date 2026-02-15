@@ -52,6 +52,7 @@ dependencies {
 
 apply from: 'capacitor.build.gradle'
 
+
 try {
     def servicesJSON = file('google-services.json')
     if (servicesJSON.exists()) {
@@ -59,4 +60,11 @@ try {
     }
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
+
+configurations.all {
+    resolutionStrategy {
+        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.0'
+        force 'org.jetbrains.kotlin:kotlin-stdlib:1.9.0'
+    }
 }
